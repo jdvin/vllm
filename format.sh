@@ -26,7 +26,7 @@ RUFF_VERSION=$(ruff --version | awk '{print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 CODESPELL_VERSION=$(codespell --version)
 ISORT_VERSION=$(isort --vn)
-CLANGFORMAT_VERSION=$(clang-format --version | awk '{print $3}')
+CLANGFORMAT_VERSION=$(clang-format --version | awk '{print $4}')
 
 # # params: tool name, tool version, required version
 tool_version_check() {

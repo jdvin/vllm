@@ -1,4 +1,5 @@
 """A GPU worker class."""
+
 import gc
 import os
 from typing import Dict, List, Optional, Set, Tuple, Type, Union
@@ -7,22 +8,36 @@ import torch
 import torch.distributed
 
 import vllm.envs as envs
-from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
-                         ModelConfig, ObservabilityConfig, ParallelConfig,
-                         PromptAdapterConfig, SchedulerConfig,
-                         SpeculativeConfig)
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment,
-                              set_custom_all_reduce)
+from vllm.config import (
+    CacheConfig,
+    DeviceConfig,
+    LoadConfig,
+    LoRAConfig,
+    ModelConfig,
+    ObservabilityConfig,
+    ParallelConfig,
+    PromptAdapterConfig,
+    SchedulerConfig,
+    SpeculativeConfig,
+)
+from vllm.distributed import (
+    ensure_model_parallel_initialized,
+    init_distributed_environment,
+    set_custom_all_reduce,
+)
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
 from vllm.platforms import current_platform
 from vllm.prompt_adapter.request import PromptAdapterRequest
-from vllm.sequence import (ExecuteModelRequest, IntermediateTensors,
-                           SamplerOutput, SequenceGroupMetadata,
-                           SequenceGroupMetadataDelta)
+from vllm.sequence import (
+    ExecuteModelRequest,
+    IntermediateTensors,
+    SamplerOutput,
+    SequenceGroupMetadata,
+    SequenceGroupMetadataDelta,
+)
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.embedding_model_runner import EmbeddingModelRunner
 from vllm.worker.enc_dec_model_runner import EncoderDecoderModelRunner
@@ -72,22 +87,25 @@ class Worker(LocalOrDistributedWorkerBase):
         self.prompt_adapter_config = prompt_adapter_config
         self.is_driver_worker = is_driver_worker
         if parallel_config and is_driver_worker:
-            assert rank % parallel_config.tensor_parallel_size == 0, \
-                   "Driver worker should be rank 0 of tensor parallel group."
+            assert (
+                rank % parallel_config.tensor_parallel_size == 0
+            ), "Driver worker should be rank 0 of tensor parallel group."
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils import init_cached_hf_modules
+
             init_cached_hf_modules()
         self.observability_config = observability_config
 
         # Return hidden states from target model if the draft model is an
-        # mlp_speculator
-        speculative_args = {} if speculative_config is None \
-            or (speculative_config.draft_model_config.model ==
-                model_config.model) \
-            or (speculative_config.draft_model_config.hf_config.model_type
-                not in ["medusa", "mlp_speculator", "eagle"]) \
-                    else {"return_hidden_states": True}
+        # mlp_speculator or the model config specifies it.
+        additional_args = {}
+        if (speculative_config is None or
+            (speculative_config.draft_model_config.model == model_config.model)
+                or (speculative_config.draft_model_config.hf_config.model_type
+                    not in ["medusa", "mlp_speculator", "eagle"])
+                or model_config.return_hidden_states == True):
+            additional_args["return_hidden_states"] = True
 
         ModelRunnerClass: Type[GPUModelRunnerBase] = ModelRunner
         if model_runner_cls is not None:
@@ -108,7 +126,7 @@ class Worker(LocalOrDistributedWorkerBase):
             is_driver_worker=is_driver_worker,
             prompt_adapter_config=prompt_adapter_config,
             observability_config=observability_config,
-            **speculative_args,
+            **additional_args,
         )
         # Uninitialized cache engine. Will be initialized by
         # initialize_cache.
@@ -121,8 +139,10 @@ class Worker(LocalOrDistributedWorkerBase):
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
         if envs.VLLM_TORCH_PROFILER_DIR:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
-            logger.info("Profiling enabled. Traces will be saved to: %s",
-                        torch_profiler_trace_dir)
+            logger.info(
+                "Profiling enabled. Traces will be saved to: %s",
+                torch_profiler_trace_dir,
+            )
             self.profiler = torch.profiler.profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
@@ -130,7 +150,8 @@ class Worker(LocalOrDistributedWorkerBase):
                 ],
                 with_stack=True,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True))
+                    torch_profiler_trace_dir, use_gzip=True),
+            )
         else:
             self.profiler = None
 
@@ -172,9 +193,12 @@ class Worker(LocalOrDistributedWorkerBase):
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
-        init_worker_distributed_environment(self.parallel_config, self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank)
+        init_worker_distributed_environment(
+            self.parallel_config,
+            self.rank,
+            self.distributed_init_method,
+            self.local_rank,
+        )
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
@@ -254,9 +278,11 @@ class Worker(LocalOrDistributedWorkerBase):
 
         This also warms up the model, which may record CUDA graphs.
         """
-        raise_if_cache_size_invalid(num_gpu_blocks,
-                                    self.cache_config.block_size,
-                                    self.model_config.max_model_len)
+        raise_if_cache_size_invalid(
+            num_gpu_blocks,
+            self.cache_config.block_size,
+            self.model_config.max_model_len,
+        )
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
@@ -267,9 +293,12 @@ class Worker(LocalOrDistributedWorkerBase):
     def _init_cache_engine(self):
         assert self.cache_config.num_gpu_blocks is not None
         self.cache_engine = [
-            CacheEngine(self.cache_config, self.model_config,
-                        self.parallel_config, self.device_config)
-            for _ in range(self.parallel_config.pipeline_parallel_size)
+            CacheEngine(
+                self.cache_config,
+                self.model_config,
+                self.parallel_config,
+                self.device_config,
+            ) for _ in range(self.parallel_config.pipeline_parallel_size)
         ]
         self.gpu_cache = [
             self.cache_engine[ve].gpu_cache
@@ -338,10 +367,11 @@ class Worker(LocalOrDistributedWorkerBase):
             self.cache_engine[virtual_engine].copy(worker_input.blocks_to_copy)
 
     def _get_cached_seq_group_metadata(
-            self,
-            seq_group_metadata_list: List[Union[SequenceGroupMetadata,
-                                                SequenceGroupMetadataDelta]],
-            finished_request_ids: List[str]) -> List[SequenceGroupMetadata]:
+        self,
+        seq_group_metadata_list: List[Union[SequenceGroupMetadata,
+                                            SequenceGroupMetadataDelta]],
+        finished_request_ids: List[str],
+    ) -> List[SequenceGroupMetadata]:
         """Return a list of cached Sequence Group Metadata after updating its
         state.
 
@@ -386,10 +416,10 @@ class Worker(LocalOrDistributedWorkerBase):
         if execute_model_req is not None:
             new_seq_group_metadata_list = self._get_cached_seq_group_metadata(
                 execute_model_req.seq_group_metadata_list,
-                execute_model_req.finished_requests_ids)
+                execute_model_req.finished_requests_ids,
+            )
 
-            execute_model_req.seq_group_metadata_list = (
-                new_seq_group_metadata_list)
+            execute_model_req.seq_group_metadata_list = new_seq_group_metadata_list
         output = super()._execute_model_spmd(execute_model_req,
                                              intermediate_tensors)
         return output
@@ -428,8 +458,7 @@ class Worker(LocalOrDistributedWorkerBase):
         return self.model_runner.vocab_size
 
     def get_cache_block_size_bytes(self) -> int:
-        """Get the size of the KV cache block size in bytes.
-        """
+        """Get the size of the KV cache block size in bytes."""
         return CacheEngine.get_cache_block_size(self.cache_config,
                                                 self.model_config,
                                                 self.parallel_config)

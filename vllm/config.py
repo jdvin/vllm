@@ -1,8 +1,7 @@
 import enum
 import json
 from dataclasses import dataclass, field, fields
-from typing import (TYPE_CHECKING, ClassVar, List, Mapping, Optional, Tuple,
-                    Type, Union)
+from typing import TYPE_CHECKING, ClassVar, List, Mapping, Optional, Tuple, Type, Union
 
 import torch
 from transformers import PretrainedConfig
@@ -13,13 +12,23 @@ from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
 from vllm.model_executor.models import ModelRegistry
 from vllm.platforms import current_platform
 from vllm.tracing import is_otel_available, otel_import_error_traceback
-from vllm.transformers_utils.config import (get_config,
-                                            get_hf_image_processor_config,
-                                            get_hf_text_config)
-from vllm.utils import (STR_NOT_IMPL_ENC_DEC_CUDAGRAPH, GiB_bytes,
-                        cuda_device_count_stateless, get_cpu_memory, is_cpu,
-                        is_hip, is_neuron, is_openvino, is_xpu,
-                        print_warning_once)
+from vllm.transformers_utils.config import (
+    get_config,
+    get_hf_image_processor_config,
+    get_hf_text_config,
+)
+from vllm.utils import (
+    STR_NOT_IMPL_ENC_DEC_CUDAGRAPH,
+    GiB_bytes,
+    cuda_device_count_stateless,
+    get_cpu_memory,
+    is_cpu,
+    is_hip,
+    is_neuron,
+    is_openvino,
+    is_xpu,
+    print_warning_once,
+)
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
@@ -27,7 +36,7 @@ if TYPE_CHECKING:
     from vllm.executor.executor_base import ExecutorBase
     from vllm.model_executor.model_loader.loader import BaseModelLoader
     from vllm.transformers_utils.tokenizer_group.base_tokenizer_group import (
-        BaseTokenizerGroup)
+        BaseTokenizerGroup, )
 
 logger = init_logger(__name__)
 
@@ -57,8 +66,8 @@ class ModelConfig:
 
     Args:
         model: Name or path of the huggingface model to use.
-            It is also used as the content for `model_name` tag in metrics 
-            output when `served_model_name` is not specified. 
+            It is also used as the content for `model_name` tag in metrics
+            output when `served_model_name` is not specified.
         tokenizer: Name or path of the huggingface tokenizer to use.
         tokenizer_mode: Tokenizer mode. "auto" will use the fast tokenizer if
             available, and "slow" will always use the slow tokenizer.
@@ -80,6 +89,7 @@ class ModelConfig:
         tokenizer_revision: The specific tokenizer version to use. It can be a
             branch name, a tag name, or a commit id. If unspecified, will use
             the default version.
+        return_hidden_states: Whether the model should return hidden states with each token.
         max_model_len: Maximum length of a sequence (including prompt and
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
@@ -108,10 +118,10 @@ class ModelConfig:
         skip_tokenizer_init: If true, skip initialization of tokenizer and
             detokenizer.
         served_model_name: The model name used in metrics tag `model_name`,
-            matches the model name exposed via the APIs. If multiple model 
-            names provided, the first name will be used. If not specified, 
+            matches the model name exposed via the APIs. If multiple model
+            names provided, the first name will be used. If not specified,
             the model name will be the same as `model`.
-        limit_mm_per_prompt: Maximum number of data instances per modality 
+        limit_mm_per_prompt: Maximum number of data instances per modality
             per prompt. Only applicable for multimodal models.
     """
 
@@ -128,6 +138,7 @@ class ModelConfig:
         rope_scaling: Optional[dict] = None,
         rope_theta: Optional[float] = None,
         tokenizer_revision: Optional[str] = None,
+        return_hidden_states: Optional[bool] = None,
         max_model_len: Optional[int] = None,
         spec_target_max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
@@ -155,6 +166,7 @@ class ModelConfig:
             self.tokenizer_revision = revision
         else:
             self.tokenizer_revision = tokenizer_revision
+        self.return_hidden_states = return_hidden_states
         self.quantization = quantization
         self.quantization_param_path = quantization_param_path
         self.enforce_eager = enforce_eager
@@ -166,8 +178,14 @@ class ModelConfig:
         self.disable_sliding_window = disable_sliding_window
         self.skip_tokenizer_init = skip_tokenizer_init
 
-        self.hf_config = get_config(self.model, trust_remote_code, revision,
-                                    code_revision, rope_scaling, rope_theta)
+        self.hf_config = get_config(
+            self.model,
+            trust_remote_code,
+            revision,
+            code_revision,
+            rope_scaling,
+            rope_theta,
+        )
         self.hf_text_config = get_hf_text_config(self.hf_config)
         self.hf_image_processor_config = get_hf_image_processor_config(
             self.model, revision)
@@ -175,7 +193,7 @@ class ModelConfig:
 
         # Choose a default enforce_eager value if the user did not specify
         # a value (enforce_eager is None)
-        if getattr(self.hf_config, 'is_encoder_decoder', False):
+        if getattr(self.hf_config, "is_encoder_decoder", False):
             if self.enforce_eager is None:
                 # *Only for encoder/decoder models* and
                 # *only if enforce_eager is unset*, override
@@ -216,7 +234,8 @@ class ModelConfig:
             max_model_len=max_model_len,
             disable_sliding_window=self.disable_sliding_window,
             sliding_window_len=self.get_hf_config_sliding_window(),
-            spec_target_max_model_len=spec_target_max_model_len)
+            spec_target_max_model_len=spec_target_max_model_len,
+        )
         self.served_model_name = get_served_model_name(model,
                                                        served_model_name)
         self.multimodal_config = self._init_multimodal_config(
@@ -266,9 +285,15 @@ class ModelConfig:
         supported_quantization = [*QUANTIZATION_METHODS]
         rocm_supported_quantization = ["gptq", "squeezellm", "fp8"]
         optimized_quantization_methods = [
-            "fp8", "marlin", "gptq_marlin_24", "gptq_marlin", "awq_marlin",
-            "fbgemm_fp8", "compressed_tensors", "compressed-tensors",
-            "experts_int8"
+            "fp8",
+            "marlin",
+            "gptq_marlin_24",
+            "gptq_marlin",
+            "awq_marlin",
+            "fbgemm_fp8",
+            "compressed_tensors",
+            "compressed-tensors",
+            "experts_int8",
         ]
         tpu_supported_quantization = ["tpu_int8"]
         if self.quantization is not None:
@@ -309,8 +334,8 @@ class ModelConfig:
                 raise ValueError(
                     f"{self.quantization} quantization is currently not "
                     f"supported in ROCm.")
-            if current_platform.is_tpu(
-            ) and self.quantization not in tpu_supported_quantization:
+            if (current_platform.is_tpu()
+                    and self.quantization not in tpu_supported_quantization):
                 raise ValueError(
                     f"{self.quantization} quantization is currently not "
                     f"supported in TPU Backend.")
@@ -318,7 +343,9 @@ class ModelConfig:
                 logger.warning(
                     "%s quantization is not fully "
                     "optimized yet. The speed can be slower than "
-                    "non-quantized models.", self.quantization)
+                    "non-quantized models.",
+                    self.quantization,
+                )
 
     def _verify_cuda_graph(self) -> None:
         if self.max_seq_len_to_capture is None:
@@ -341,8 +368,8 @@ class ModelConfig:
 
         pipeline_parallel_size = parallel_config.pipeline_parallel_size
         architectures = getattr(self.hf_config, "architectures", [])
-        if not all(arch in _PP_SUPPORTED_MODELS
-                   for arch in architectures) and pipeline_parallel_size > 1:
+        if (not all(arch in _PP_SUPPORTED_MODELS for arch in architectures)
+                and pipeline_parallel_size > 1):
             raise NotImplementedError(
                 "Pipeline parallelism is only supported for the following "
                 f" architectures: {_PP_SUPPORTED_MODELS}.")
@@ -370,8 +397,7 @@ class ModelConfig:
         return getattr(self.hf_text_config, "sliding_window", None)
 
     def get_sliding_window(self) -> Optional[int]:
-        """Get the sliding window size, or None if disabled.
-        """
+        """Get the sliding window size, or None if disabled."""
         # If user disables sliding window, return None.
         if self.disable_sliding_window:
             return None
@@ -386,8 +412,8 @@ class ModelConfig:
 
     def get_head_size(self) -> int:
         # TODO remove hard code
-        if hasattr(self.hf_text_config, "model_type"
-                   ) and self.hf_text_config.model_type == 'deepseek_v2':
+        if (hasattr(self.hf_text_config, "model_type")
+                and self.hf_text_config.model_type == "deepseek_v2"):
             # FlashAttention supports only head_size 32, 64, 128, 256,
             # we need to pad head_size 192 to 256
             return 256
@@ -419,8 +445,11 @@ class ModelConfig:
                 return self.hf_config.attn_config["kv_n_heads"]
             return self.hf_config.num_attention_heads
         if self.hf_config.model_type == "dbrx":
-            return getattr(self.hf_config.attn_config, "kv_n_heads",
-                           self.hf_config.num_attention_heads)
+            return getattr(
+                self.hf_config.attn_config,
+                "kv_n_heads",
+                self.hf_config.num_attention_heads,
+            )
 
         attributes = [
             # For Falcon:
@@ -457,6 +486,7 @@ class ModelConfig:
 
     def get_num_layers(self, parallel_config: "ParallelConfig") -> int:
         from vllm.distributed.utils import get_pp_indices
+
         total_num_hidden_layers = getattr(self.hf_text_config,
                                           "num_hidden_layers", 0)
         pp_rank = parallel_config.rank // parallel_config.tensor_parallel_size
@@ -615,6 +645,7 @@ class TokenizerPoolConfig:
             The way the config will be used depends on the
             pool type.
     """
+
     pool_size: int
     pool_type: Union[str, Type["BaseTokenizerGroup"]]
     extra_config: dict
@@ -628,8 +659,10 @@ class TokenizerPoolConfig:
 
     @classmethod
     def create_config(
-        cls, tokenizer_pool_size: int, tokenizer_pool_type: str,
-        tokenizer_pool_extra_config: Optional[Union[str, dict]]
+        cls,
+        tokenizer_pool_size: int,
+        tokenizer_pool_type: str,
+        tokenizer_pool_extra_config: Optional[Union[str, dict]],
     ) -> Optional["TokenizerPoolConfig"]:
         """Create a TokenizerPoolConfig from the given parameters.
 
@@ -647,11 +680,12 @@ class TokenizerPoolConfig:
                 tokenizer_pool_extra_config_parsed = json.loads(
                     tokenizer_pool_extra_config)
             else:
-                tokenizer_pool_extra_config_parsed = (
-                    tokenizer_pool_extra_config or {})
-            tokenizer_pool_config = cls(tokenizer_pool_size,
-                                        tokenizer_pool_type,
-                                        tokenizer_pool_extra_config_parsed)
+                tokenizer_pool_extra_config_parsed = tokenizer_pool_extra_config or {}
+            tokenizer_pool_config = cls(
+                tokenizer_pool_size,
+                tokenizer_pool_type,
+                tokenizer_pool_extra_config_parsed,
+            )
         else:
             tokenizer_pool_config = None
         return tokenizer_pool_config
@@ -672,25 +706,25 @@ class LoadFormat(str, enum.Enum):
 @dataclass
 class LoadConfig:
     """
-        download_dir: Directory to download and load the weights, default to the
-            default cache directory of huggingface.
-        load_format: The format of the model weights to load:
-            "auto" will try to load the weights in the safetensors format and
-                fall back to the pytorch bin format if safetensors format is
-                not available.
-            "pt" will load the weights in the pytorch bin format.
-            "safetensors" will load the weights in the safetensors format.
-            "npcache" will load the weights in pytorch format and store
-                a numpy cache to speed up the loading.
-            "dummy" will initialize the weights with random values, which is
-                mainly for profiling.
-            "tensorizer" will use CoreWeave's tensorizer library for
-                fast weight loading.
-            "bitsandbytes" will load nf4 type weights.
-        ignore_patterns: The list of patterns to ignore when loading the model.
-            Default to "original/**/*" to avoid repeated loading of llama's 
-            checkpoints.
-            
+    download_dir: Directory to download and load the weights, default to the
+        default cache directory of huggingface.
+    load_format: The format of the model weights to load:
+        "auto" will try to load the weights in the safetensors format and
+            fall back to the pytorch bin format if safetensors format is
+            not available.
+        "pt" will load the weights in the pytorch bin format.
+        "safetensors" will load the weights in the safetensors format.
+        "npcache" will load the weights in pytorch format and store
+            a numpy cache to speed up the loading.
+        "dummy" will initialize the weights with random values, which is
+            mainly for profiling.
+        "tensorizer" will use CoreWeave's tensorizer library for
+            fast weight loading.
+        "bitsandbytes" will load nf4 type weights.
+    ignore_patterns: The list of patterns to ignore when loading the model.
+        Default to "original/**/*" to avoid repeated loading of llama's
+        checkpoints.
+
     """
 
     load_format: Union[str, LoadFormat, "BaseModelLoader"] = LoadFormat.AUTO
@@ -709,7 +743,8 @@ class LoadConfig:
         if self.ignore_patterns is not None and len(self.ignore_patterns) > 0:
             logger.info(
                 "Ignoring the following patterns when downloading weights: %s",
-                self.ignore_patterns)
+                self.ignore_patterns,
+            )
         else:
             self.ignore_patterns = ["original/**/*"]
 
@@ -791,6 +826,7 @@ class ParallelConfig:
             # current node and we aren't in a ray placement group.
 
             from vllm.executor import ray_utils
+
             backend = "mp"
             ray_found = ray_utils.ray_is_available()
             if cuda_device_count_stateless() < self.world_size:
@@ -805,8 +841,10 @@ class ParallelConfig:
                     backend = "ray"
                 else:
                     from ray import is_initialized as ray_is_initialized
+
                     if ray_is_initialized():
                         from ray.util import get_current_placement_group
+
                         if get_current_placement_group():
                             backend = "ray"
             self.distributed_executor_backend = backend
@@ -836,6 +874,7 @@ class ParallelConfig:
                 "values are 'ray', 'mp' or custom ExecutorBase subclass.")
         if self.use_ray:
             from vllm.executor import ray_utils
+
             ray_utils.assert_ray_available()
         if is_hip():
             self.disable_custom_all_reduce = True
@@ -867,7 +906,7 @@ class SchedulerConfig:
         enable_chunked_prefill: If True, prefill requests can be chunked based
             on the remaining max_num_batched_tokens.
         embedding_mode: Whether the running model is for embedding.
-        preemption_mode: Whether to perform preemption by swapping or 
+        preemption_mode: Whether to perform preemption by swapping or
             recomputation. If not specified, we determine the mode as follows:
             We use recomputation by default since it incurs lower overhead than
             swapping. However, when the sequence group has multiple sequences
@@ -880,18 +919,20 @@ class SchedulerConfig:
 
     """
 
-    def __init__(self,
-                 max_num_batched_tokens: Optional[int],
-                 max_num_seqs: int,
-                 max_model_len: int,
-                 use_v2_block_manager: bool = False,
-                 num_lookahead_slots: int = 0,
-                 delay_factor: float = 0.0,
-                 enable_chunked_prefill: bool = False,
-                 embedding_mode: Optional[bool] = False,
-                 preemption_mode: Optional[str] = None,
-                 num_scheduler_steps: int = 1,
-                 send_delta_data: bool = False) -> None:
+    def __init__(
+        self,
+        max_num_batched_tokens: Optional[int],
+        max_num_seqs: int,
+        max_model_len: int,
+        use_v2_block_manager: bool = False,
+        num_lookahead_slots: int = 0,
+        delay_factor: float = 0.0,
+        enable_chunked_prefill: bool = False,
+        embedding_mode: Optional[bool] = False,
+        preemption_mode: Optional[str] = None,
+        num_scheduler_steps: int = 1,
+        send_delta_data: bool = False,
+    ) -> None:
         if max_num_batched_tokens is not None:
             self.max_num_batched_tokens = max_num_batched_tokens
         else:
@@ -910,7 +951,8 @@ class SchedulerConfig:
         if enable_chunked_prefill:
             logger.info(
                 "Chunked prefill is enabled with max_num_batched_tokens=%d.",
-                self.max_num_batched_tokens)
+                self.max_num_batched_tokens,
+            )
 
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
@@ -1066,7 +1108,7 @@ class SpeculativeConfig:
             typical_acceptance_sampler_posterior_threshold (Optional[float]):
                 A threshold value that sets a lower bound on the posterior
                 probability of a token in the target model for it to be
-                accepted. This threshold is used only when we use the 
+                accepted. This threshold is used only when we use the
                 TypicalAcceptanceSampler for token acceptance.
             typical_acceptance_sampler_posterior_alpha (Optional[float]):
                 A scaling factor for the entropy-based threshold in the
@@ -1076,7 +1118,7 @@ class SpeculativeConfig:
                 If set to False, token log probabilities are returned
                 according to the log probability settings in SamplingParams.
                 If not specified, it defaults to True.
-    
+
         Returns:
             Optional["SpeculativeConfig"]: An instance of SpeculativeConfig if
                 the necessary conditions are met, else None.
@@ -1150,8 +1192,8 @@ class SpeculativeConfig:
 
             draft_hf_config = draft_model_config.hf_config
 
-            if (num_speculative_tokens is not None
-                    and hasattr(draft_hf_config, "num_lookahead_tokens")):
+            if num_speculative_tokens is not None and hasattr(
+                    draft_hf_config, "num_lookahead_tokens"):
                 draft_hf_config.num_lookahead_tokens = num_speculative_tokens
 
             n_predict = getattr(draft_hf_config, "n_predict", None)
@@ -1174,10 +1216,11 @@ class SpeculativeConfig:
                     target_model_config.max_model_len,
                 ))
 
-            draft_parallel_config = (
-                SpeculativeConfig.create_draft_parallel_config(
-                    target_parallel_config,
-                    speculative_draft_tensor_parallel_size, draft_hf_config))
+            draft_parallel_config = SpeculativeConfig.create_draft_parallel_config(
+                target_parallel_config,
+                speculative_draft_tensor_parallel_size,
+                draft_hf_config,
+            )
 
         if num_speculative_tokens is None:
             raise ValueError(
@@ -1200,10 +1243,10 @@ class SpeculativeConfig:
             ngram_prompt_lookup_max,
             ngram_prompt_lookup_min,
             draft_token_acceptance_method=draft_token_acceptance_method,
-            typical_acceptance_sampler_posterior_threshold=\
-                typical_acceptance_sampler_posterior_threshold,
-            typical_acceptance_sampler_posterior_alpha=\
-                typical_acceptance_sampler_posterior_alpha,
+            typical_acceptance_sampler_posterior_threshold=
+            typical_acceptance_sampler_posterior_threshold,
+            typical_acceptance_sampler_posterior_alpha=
+            typical_acceptance_sampler_posterior_alpha,
             disable_logprobs=disable_logprobs,
             disable_log_stats=disable_log_stats,
         )
@@ -1261,8 +1304,8 @@ class SpeculativeConfig:
                         "MLPSpeculator cannot currently be run with tp>1; "
                         "setting speculative_draft_tensor_parallel_size=1")
             else:
-                speculative_draft_tensor_parallel_size = \
-                    target_parallel_config.tensor_parallel_size
+                speculative_draft_tensor_parallel_size = (
+                    target_parallel_config.tensor_parallel_size)
         elif speculative_draft_tensor_parallel_size != 1:
             # TODO(wooyeon): allow tp values larger than 1
             raise ValueError(
@@ -1321,13 +1364,13 @@ class SpeculativeConfig:
             typical_acceptance_sampler_posterior_threshold (Optional[float]):
                 A threshold value that sets a lower bound on the posterior
                 probability of a token in the target model for it to be
-                accepted. This threshold is used only when we use the 
+                accepted. This threshold is used only when we use the
                 TypicalAcceptanceSampler for token acceptance.
             typical_acceptance_sampler_posterior_alpha (Optional[float]):
                 A scaling factor for the entropy-based threshold in the
                 TypicalAcceptanceSampler.
             disable_logprobs: If set to True, token log probabilities will not
-                be returned even if requested by sampling parameters. This 
+                be returned even if requested by sampling parameters. This
                 reduces latency by skipping logprob calculation in proposal
                 sampling, target sampling, and after accepted tokens are
                 determined. If set to False, log probabilities will be
@@ -1338,15 +1381,14 @@ class SpeculativeConfig:
         self.draft_model_config = draft_model_config
         self.draft_parallel_config = draft_parallel_config
         self.num_speculative_tokens = num_speculative_tokens
-        self.speculative_disable_by_batch_size = \
-            speculative_disable_by_batch_size
+        self.speculative_disable_by_batch_size = speculative_disable_by_batch_size
         self.ngram_prompt_lookup_max = ngram_prompt_lookup_max or 0
         self.ngram_prompt_lookup_min = ngram_prompt_lookup_min or 0
         self.draft_token_acceptance_method = draft_token_acceptance_method
-        self.typical_acceptance_sampler_posterior_threshold = \
-            typical_acceptance_sampler_posterior_threshold
-        self.typical_acceptance_sampler_posterior_alpha = \
-            typical_acceptance_sampler_posterior_alpha
+        self.typical_acceptance_sampler_posterior_threshold = (
+            typical_acceptance_sampler_posterior_threshold)
+        self.typical_acceptance_sampler_posterior_alpha = (
+            typical_acceptance_sampler_posterior_alpha)
         self.disable_logprobs = disable_logprobs
         self.disable_log_stats = disable_log_stats
 
@@ -1362,14 +1404,14 @@ class SpeculativeConfig:
                 self.draft_parallel_config)
             # Validate and set draft token acceptance related settings.
 
-        if (self.draft_token_acceptance_method is None):
+        if self.draft_token_acceptance_method is None:
             raise ValueError("draft_token_acceptance_method is not set. "
                              "Expected values are rejection_sampler or "
                              "typical_acceptance_sampler.")
 
-        if (self.draft_token_acceptance_method != 'rejection_sampler'
+        if (self.draft_token_acceptance_method != "rejection_sampler"
                 and self.draft_token_acceptance_method !=
-                'typical_acceptance_sampler'):
+                "typical_acceptance_sampler"):
             raise ValueError(
                 "Expected draft_token_acceptance_method to be either "
                 "rejection_sampler or typical_acceptance_sampler. Instead it "
@@ -1445,11 +1487,14 @@ class LoRAConfig:
         elif isinstance(self.lora_dtype, str):
             self.lora_dtype = getattr(torch, self.lora_dtype)
         if model_config.quantization and model_config.quantization not in [
-                "awq", "gptq"
+                "awq",
+                "gptq",
         ]:
             # TODO support marlin and squeezellm
-            logger.warning("%s quantization is not tested with LoRA yet.",
-                           model_config.quantization)
+            logger.warning(
+                "%s quantization is not tested with LoRA yet.",
+                model_config.quantization,
+            )
 
     def verify_with_scheduler_config(self, scheduler_config: SchedulerConfig):
         if scheduler_config.chunked_prefill_enabled:
@@ -1464,7 +1509,7 @@ class PromptAdapterConfig:
     prompt_adapter_dtype: Optional[torch.dtype] = None
 
     def __post_init__(self):
-        library_name = 'peft'
+        library_name = "peft"
         try:
             __import__(library_name)
         except ImportError as e:
@@ -1595,15 +1640,15 @@ def _get_and_verify_max_len(
     for key in possible_keys:
         max_len = getattr(hf_config, key, None)
         if max_len is not None:
-            max_len_key = key if max_len < derived_max_model_len \
-                else max_len_key
+            max_len_key = key if max_len < derived_max_model_len else max_len_key
             derived_max_model_len = min(derived_max_model_len, max_len)
 
     # If sliding window is manually disabled, max_length should be less
     # than the sliding window length in the model config.
     if disable_sliding_window and sliding_window_len is not None:
-        max_len_key = "sliding_window" \
-            if sliding_window_len < derived_max_model_len else max_len_key
+        max_len_key = ("sliding_window"
+                       if sliding_window_len < derived_max_model_len else
+                       max_len_key)
         derived_max_model_len = min(derived_max_model_len, sliding_window_len)
 
     # If none of the keys were found in the config, use a default and
@@ -1622,8 +1667,10 @@ def _get_and_verify_max_len(
         logger.warning(
             "The model's config.json does not contain any of the following "
             "keys to determine the original maximum length of the model: "
-            "%s. Assuming the model's maximum length is %d.", possible_keys,
-            default_max_len)
+            "%s. Assuming the model's maximum length is %d.",
+            possible_keys,
+            default_max_len,
+        )
         derived_max_model_len = default_max_len
 
     rope_scaling = getattr(hf_config, "rope_scaling", None)
@@ -1681,7 +1728,9 @@ def _get_and_verify_max_len(
             if envs.VLLM_ALLOW_LONG_MAX_MODEL_LEN:
                 logger.warning(
                     "%s Make sure the value is correct and within the "
-                    "model context size.", msg)
+                    "model context size.",
+                    msg,
+                )
             else:
                 raise ValueError(
                     f"{msg} To allow overriding this maximum, set "
@@ -1692,10 +1741,10 @@ def _get_and_verify_max_len(
 def get_served_model_name(model: str,
                           served_model_name: Optional[Union[str, List[str]]]):
     """
-    If the input is a non-empty list, the first model_name in 
-    `served_model_name` is taken. 
-    If the input is a non-empty string, it is used directly. 
-    For cases where the input is either an empty string or an 
+    If the input is a non-empty list, the first model_name in
+    `served_model_name` is taken.
+    If the input is a non-empty string, it is used directly.
+    For cases where the input is either an empty string or an
     empty list, the fallback is to use `self.model`.
     """
     if not served_model_name:
@@ -1710,10 +1759,10 @@ class DecodingConfig:
     """Dataclass which contains the decoding strategy of the engine"""
 
     # Which guided decoding algo to use. 'outlines' / 'lm-format-enforcer'
-    guided_decoding_backend: str = 'outlines'
+    guided_decoding_backend: str = "outlines"
 
     def __post_init__(self):
-        valid_guided_backends = ['outlines', 'lm-format-enforcer']
+        valid_guided_backends = ["outlines", "lm-format-enforcer"]
         backend = self.guided_decoding_backend
         if backend not in valid_guided_backends:
             raise ValueError(f"Invalid guided_decoding_backend '{backend},"
@@ -1723,6 +1772,7 @@ class DecodingConfig:
 @dataclass
 class ObservabilityConfig:
     """Configuration for observability."""
+
     otlp_traces_endpoint: Optional[str] = None
 
     # Collecting detailed timing information for each request can be expensive.
@@ -1740,9 +1790,8 @@ class ObservabilityConfig:
                 "'otlp_traces_endpoint'. Ensure OpenTelemetry packages are "
                 f"installed. Original error:\n{otel_import_error_traceback}")
 
-        if ((self.collect_model_forward_time
-             or self.collect_model_execute_time)
-                and self.otlp_traces_endpoint is None):
+        if (self.collect_model_forward_time or self.collect_model_execute_time
+            ) and self.otlp_traces_endpoint is None:
             raise ValueError(
                 "collect_model_forward_time or collect_model_execute_time "
                 "requires --otlp-traces-endpoint to be set.")
@@ -1767,8 +1816,7 @@ class EngineConfig:
     prompt_adapter_config: Optional[PromptAdapterConfig]
 
     def __post_init__(self):
-        """Verify configs are valid & consistent with each other.
-        """
+        """Verify configs are valid & consistent with each other."""
         self.model_config.verify_with_parallel_config(self.parallel_config)
         self.cache_config.verify_with_parallel_config(self.parallel_config)
 
@@ -1781,7 +1829,6 @@ class EngineConfig:
                 self.model_config)
 
     def to_dict(self):
-        """Return the configs as a dictionary, for use in **kwargs.
-        """
+        """Return the configs as a dictionary, for use in **kwargs."""
         return dict(
             (field.name, getattr(self, field.name)) for field in fields(self))
