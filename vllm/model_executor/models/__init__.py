@@ -65,7 +65,7 @@ _GENERATION_MODELS = {
     "EAGLEModel": ("eagle", "EAGLE"),
     "MLPSpeculatorPreTrainedModel": ("mlp_speculator", "MLPSpeculator"),
     "JambaForCausalLM": ("jamba", "JambaForCausalLM"),
-    "GraniteForCausalLM": ("granite", "GraniteForCausalLM")
+    "GraniteForCausalLM": ("granite", "GraniteForCausalLM"),
 }
 
 _EMBEDDING_MODELS = {
@@ -73,19 +73,23 @@ _EMBEDDING_MODELS = {
 }
 
 _MULTIMODAL_MODELS = {
-    "Blip2ForConditionalGeneration":
-    ("blip2", "Blip2ForConditionalGeneration"),
-    "ChameleonForConditionalGeneration":
-    ("chameleon", "ChameleonForConditionalGeneration"),
+    "Blip2ForConditionalGeneration": ("blip2", "Blip2ForConditionalGeneration"),
+    "ChameleonForConditionalGeneration": (
+        "chameleon",
+        "ChameleonForConditionalGeneration",
+    ),
     "FuyuForCausalLM": ("fuyu", "FuyuForCausalLM"),
     "InternVLChatModel": ("internvl", "InternVLChatModel"),
-    "LlavaForConditionalGeneration":
-    ("llava", "LlavaForConditionalGeneration"),
-    "LlavaNextForConditionalGeneration":
-    ("llava_next", "LlavaNextForConditionalGeneration"),
+    "LlavaForConditionalGeneration": ("llava", "LlavaForConditionalGeneration"),
+    "LlavaNextForConditionalGeneration": (
+        "llava_next",
+        "LlavaNextForConditionalGeneration",
+    ),
     "MiniCPMV": ("minicpmv", "MiniCPMV"),
-    "PaliGemmaForConditionalGeneration": ("paligemma",
-                                          "PaliGemmaForConditionalGeneration"),
+    "PaliGemmaForConditionalGeneration": (
+        "paligemma",
+        "PaliGemmaForConditionalGeneration",
+    ),
     "Phi3VForCausalLM": ("phi3v", "Phi3VForCausalLM"),
     "UltravoxModel": ("ultravox", "UltravoxModel"),
 }
@@ -104,30 +108,34 @@ _MODELS = {
 # Architecture -> type.
 # out of tree models
 _OOT_MODELS: Dict[str, Type[nn.Module]] = {}
+# Architecture -> type.
+# multimodal out of tree models.
+_MM_OOT_MODELS: Dict[str, Type[nn.Module]] = {}
 
 # Models not supported by ROCm.
 _ROCM_UNSUPPORTED_MODELS: List[str] = []
 
 # Models partially supported by ROCm.
 # Architecture -> Reason.
-_ROCM_SWA_REASON = ("Sliding window attention (SWA) is not yet supported in "
-                    "Triton flash attention. For half-precision SWA support, "
-                    "please use CK flash attention by setting "
-                    "`VLLM_USE_TRITON_FLASH_ATTN=0`")
+_ROCM_SWA_REASON = (
+    "Sliding window attention (SWA) is not yet supported in "
+    "Triton flash attention. For half-precision SWA support, "
+    "please use CK flash attention by setting "
+    "`VLLM_USE_TRITON_FLASH_ATTN=0`"
+)
 _ROCM_PARTIALLY_SUPPORTED_MODELS: Dict[str, str] = {
-    "Qwen2ForCausalLM":
-    _ROCM_SWA_REASON,
-    "MistralForCausalLM":
-    _ROCM_SWA_REASON,
-    "MixtralForCausalLM":
-    _ROCM_SWA_REASON,
-    "PaliGemmaForConditionalGeneration":
-    ("ROCm flash attention does not yet "
-     "fully support 32-bit precision on PaliGemma"),
-    "Phi3VForCausalLM":
-    ("ROCm Triton flash attention may run into compilation errors due to "
-     "excessive use of shared memory. If this happens, disable Triton FA "
-     "by setting `VLLM_USE_TRITON_FLASH_ATTN=0`")
+    "Qwen2ForCausalLM": _ROCM_SWA_REASON,
+    "MistralForCausalLM": _ROCM_SWA_REASON,
+    "MixtralForCausalLM": _ROCM_SWA_REASON,
+    "PaliGemmaForConditionalGeneration": (
+        "ROCm flash attention does not yet "
+        "fully support 32-bit precision on PaliGemma"
+    ),
+    "Phi3VForCausalLM": (
+        "ROCm Triton flash attention may run into compilation errors due to "
+        "excessive use of shared memory. If this happens, disable Triton FA "
+        "by setting `VLLM_USE_TRITON_FLASH_ATTN=0`"
+    ),
 }
 
 
@@ -137,8 +145,7 @@ class ModelRegistry:
     @functools.lru_cache(maxsize=128)
     def _get_model(model_arch: str):
         module_name, model_cls_name = _MODELS[model_arch]
-        module = importlib.import_module(
-            f"vllm.model_executor.models.{module_name}")
+        module = importlib.import_module(f"vllm.model_executor.models.{module_name}")
         return getattr(module, model_cls_name, None)
 
     @staticmethod
@@ -151,17 +158,19 @@ class ModelRegistry:
             if model_arch in _ROCM_UNSUPPORTED_MODELS:
                 raise ValueError(
                     f"Model architecture {model_arch} is not supported by "
-                    "ROCm for now.")
+                    "ROCm for now."
+                )
             if model_arch in _ROCM_PARTIALLY_SUPPORTED_MODELS:
                 logger.warning(
                     "Model architecture %s is partially supported by ROCm: %s",
-                    model_arch, _ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch])
+                    model_arch,
+                    _ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch],
+                )
 
         return ModelRegistry._get_model(model_arch)
 
     @staticmethod
-    def resolve_model_cls(
-            architectures: List[str]) -> Tuple[Type[nn.Module], str]:
+    def resolve_model_cls(architectures: List[str]) -> Tuple[Type[nn.Module], str]:
         for arch in architectures:
             model_cls = ModelRegistry._try_load_model_cls(arch)
             if model_cls is not None:
@@ -169,20 +178,28 @@ class ModelRegistry:
 
         raise ValueError(
             f"Model architectures {architectures} are not supported for now. "
-            f"Supported architectures: {ModelRegistry.get_supported_archs()}")
+            f"Supported architectures: {ModelRegistry.get_supported_archs()}"
+        )
 
     @staticmethod
     def get_supported_archs() -> List[str]:
         return list(_MODELS.keys()) + list(_OOT_MODELS.keys())
 
     @staticmethod
-    def register_model(model_arch: str, model_cls: Type[nn.Module]):
+    def register_model(
+        model_arch: str, model_cls: Type[nn.Module], is_multimodal: bool = False
+    ):
         if model_arch in _MODELS:
             logger.warning(
                 "Model architecture %s is already registered, and will be "
-                "overwritten by the new model class %s.", model_arch,
-                model_cls.__name__)
+                "overwritten by the new model class %s.",
+                model_arch,
+                model_cls.__name__,
+            )
         global _OOT_MODELS
+        global _MM_OOT_MODELS
+        if is_multimodal:
+            _MM_OOT_MODELS[model_arch] = model_cls
         _OOT_MODELS[model_arch] = model_cls
 
     @staticmethod
@@ -196,7 +213,7 @@ class ModelRegistry:
         # use `supports_multimodal` to determine if a model is multimodal
         # model_cls = ModelRegistry._try_load_model_cls(model_arch)
         # from vllm.model_executor.models.interfaces import supports_multimodal
-        return model_arch in _MULTIMODAL_MODELS
+        return model_arch in _MULTIMODAL_MODELS or model_arch in _MM_OOT_MODELS
 
 
 __all__ = [
