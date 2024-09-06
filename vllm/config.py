@@ -149,6 +149,7 @@ class ModelConfig:
             skip_tokenizer_init: bool = False,
             served_model_name: Optional[Union[str, List[str]]] = None,
             limit_mm_per_prompt: Optional[Mapping[str, int]] = None,
+            inject_mm_metadata: bool = False, 
             use_async_output_proc: bool = True,
             override_neuron_config: Optional[Dict[str, Any]] = None) -> None:
         self.model = model
@@ -232,7 +233,7 @@ class ModelConfig:
         self.served_model_name = get_served_model_name(model,
                                                        served_model_name)
         self.multimodal_config = self._init_multimodal_config(
-            limit_mm_per_prompt)
+            limit_mm_per_prompt, inject_mm_metadata)
         if not self.skip_tokenizer_init:
             self._verify_tokenizer_mode()
 
@@ -243,13 +244,13 @@ class ModelConfig:
         self._verify_cuda_graph()
 
     def _init_multimodal_config(
-        self, limit_mm_per_prompt: Optional[Mapping[str, int]]
+        self, limit_mm_per_prompt: Optional[Mapping[str, int]], inject_mm_metadata: bool=False
     ) -> Optional["MultiModalConfig"]:
         architectures = getattr(self.hf_config, "architectures", [])
         if any(
                 ModelRegistry.is_multimodal_model(arch)
                 for arch in architectures):
-            return MultiModalConfig(limit_per_prompt=limit_mm_per_prompt or {})
+            return MultiModalConfig(limit_per_prompt=limit_mm_per_prompt or {}, inject_metadata=inject_mm_metadata)
         else:
             if limit_mm_per_prompt:
                 raise ValueError(
@@ -1585,11 +1586,13 @@ class PromptAdapterConfig:
 class MultiModalConfig:
     """Controls the behavior of multimodal models."""
 
+    # The maximum number of multi-modal input instances allowed per prompt
+    # for each :class:`~vllm.multimodal.MultiModalPlugin`.
     limit_per_prompt: Mapping[str, int] = field(default_factory=dict)
-    """
-    The maximum number of multi-modal input instances allowed per prompt
-    for each :class:`~vllm.multimodal.MultiModalPlugin`.
-    """
+    # Whether to pass in the multimodal metadata of the currently running
+    # sequences to the model as kwarg. 
+    # Presently, this is just the number of multimodal tokens in the input.
+    inject_metadata: bool = False
 
     # TODO: Add configs to init vision tower or not.
 

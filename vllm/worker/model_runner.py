@@ -93,6 +93,7 @@ class ModelInputForGPU(ModelRunnerInputBase):
     prompt_adapter_mapping: Optional[PromptAdapterMapping] = None
     prompt_adapter_requests: Optional[Set[PromptAdapterRequest]] = None
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
+    seq_multimodal_tokens: Optional[List[int]] = None
     request_ids_to_seq_ids: Optional[Dict[str, List[int]]] = None
     finished_requests_ids: Optional[List[str]] = None
     virtual_engine: int = 0
@@ -107,6 +108,7 @@ class ModelInputForGPU(ModelRunnerInputBase):
             "lora_requests": self.lora_requests,
             "lora_mapping": self.lora_mapping,
             "multi_modal_kwargs": self.multi_modal_kwargs,
+            "seq_multimodal_tokens": self.seq_multimodal_tokens,
             "prompt_adapter_mapping": self.prompt_adapter_mapping,
             "prompt_adapter_requests": self.prompt_adapter_requests,
             "virtual_engine": self.virtual_engine,
@@ -863,6 +865,9 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
 
         self.has_seqlen_agnostic = model_config.contains_seqlen_agnostic_layers(
             parallel_config)
+        if self.model_config.multimodal_config is not None:
+            self.has_multimodal_metadata = (
+                self.model_config.multimodal_config.inject_metadata)
 
         # When using CUDA graph, the input block tables must be padded to
         # max_seq_len_to_capture. However, creating the block table in
@@ -1391,6 +1396,12 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         is_prompt = (seq_group_metadata_list[0].is_prompt
                      if seq_group_metadata_list else None)
         return dataclasses.replace(model_input,
+                                   seq_multimodal_tokens=[
+                                       len(seq_group_metadata.multi_modal_data[
+                                           'text_conditioning']) 
+                                       for seq_group_metadata 
+                                       in seq_group_metadata_list
+                                    ] if self.has_multimodal_metadata else None,
                                    sampling_metadata=sampling_metadata,
                                    is_prompt=is_prompt,
                                    virtual_engine=virtual_engine)
@@ -1441,6 +1452,9 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             "finished_requests_ids": model_input.finished_requests_ids,
             "request_ids_to_seq_ids": model_input.request_ids_to_seq_ids,
         } if self.has_seqlen_agnostic else {}
+        multimodal_metadata_kwargs = {
+            "seq_multimodal_tokens": model_input.seq_multimodal_tokens,
+        } if self.has_multimodal_metadata else {}
         if (self.observability_config is not None
                 and self.observability_config.collect_model_forward_time):
             model_forward_start = torch.cuda.Event(enable_timing=True)
