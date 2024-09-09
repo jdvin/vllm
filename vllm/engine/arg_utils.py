@@ -108,6 +108,7 @@ class EngineArgs:
     tokenizer_pool_type: Union[str, Type["BaseTokenizerGroup"]] = "ray"
     tokenizer_pool_extra_config: Optional[dict] = None
     limit_mm_per_prompt: Optional[Mapping[str, int]] = None
+    inject_mm_metadata: bool = False
     enable_lora: bool = False
     max_loras: int = 1
     max_lora_rank: int = 16
@@ -479,7 +480,13 @@ class EngineArgs:
                   'e.g.: `image=16,video=2` allows a maximum of 16 '
                   'images and 2 videos per prompt. Defaults to 1 for '
                   'each modality.'))
-
+        parser.add_argument(
+            "--inject-mm-metadata",
+            action="store_true",
+            default=False,
+            help=(
+                "Inject multimodal metadata (e.g., per request mm tokens)"
+                " into the model inputs."))
         # LoRA related configs
         parser.add_argument('--enable-lora',
                             action='store_true',
@@ -818,6 +825,7 @@ class EngineArgs:
             skip_tokenizer_init=self.skip_tokenizer_init,
             served_model_name=self.served_model_name,
             limit_mm_per_prompt=self.limit_mm_per_prompt,
+            inject_mm_metadata=self.inject_mm_metadata,
             use_async_output_proc=not self.disable_async_output_proc,
             override_neuron_config=self.override_neuron_config)
         cache_config = CacheConfig(
