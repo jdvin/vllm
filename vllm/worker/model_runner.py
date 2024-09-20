@@ -1329,6 +1329,10 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                             self.model.get_seqlen_agnostic_capture_inputs(
                                 batch_size)
                         })
+                    if self.has_multimodal_metadata:
+                        capture_inputs.update({
+                            "seq_multimodal_tokens": [10] * batch_size
+                            })
                     graph_runner.capture(**capture_inputs)
                     self.graph_memory_pool = graph_runner.graph.pool()
                     self.graph_runners[virtual_engine][batch_size] = (
