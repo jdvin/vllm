@@ -23,19 +23,17 @@ def test_multimodal_metadata():
     )
 
     engine = LLMEngine.from_engine_args(engine_args)
-    sampling_params = SamplingParams()
+    sampling_params = SamplingParams(temperature=0.0)
     engine.add_request(
         "0",
         {
             "prompt_token_ids": [],
-            "multi_modal_data": {"text_conditioning": "Hello there."},
+            "multi_modal_data": {"text_conditioning": ""},
         },
         sampling_params,
     )
-    engine.step()
+    step1_out = engine.step()
     step2_out = engine.step()
-    assert (
-        step2_out[0].outputs[0].token_ids[0]
-        == step2_out[0].outputs[0].token_ids[1]
-        == 10
-    )
+    step3_out = engine.step()
+    assert step2_out[0].outputs[0].token_ids[0] == 9
+    assert step2_out[0].outputs[0].token_ids[0] == step2_out[0].outputs[0].token_ids[1]

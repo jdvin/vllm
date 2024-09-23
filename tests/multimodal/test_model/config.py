@@ -9,8 +9,8 @@ class TestModelConfig(PretrainedConfig):
     )
     _commit_hash: str = ""
     attn_implementation: str = "flash_attn"
-    vocab_size: int = 50256
-    text_n_positions: int = 1024
+    vocab_size: int = 1024
+    text_n_positions: int = 10
     num_attention_heads: int = 16
     hidden_size: int = 1024
     head_size: int = 64

@@ -11,12 +11,20 @@ from vllm.inputs import INPUT_REGISTRY
 from vllm.inputs.data import LLMInputs
 from vllm.inputs.registry import InputContext
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
+from vllm.model_executor.models.utils import is_pp_missing_parameter
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.base import MultiModalData, MultiModalDataDict, MultiModalInputs, MultiModalPlugin
+from vllm.multimodal.base import (
+    MultiModalData,
+    MultiModalDataDict,
+    MultiModalInputs,
+    MultiModalPlugin,
+)
 from vllm.sequence import VLLM_TOKEN_ID_ARRAY_TYPE, IntermediateTensors, SequenceData
+from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 logger = getLogger(__name__)
+
 
 def dummy_data_for_test_model(
     ctx: InputContext, seq_len: int, mm_counts: Mapping[str, int]
@@ -30,7 +38,9 @@ def dummy_data_for_test_model(
     return seq, mmdd
 
 
-def input_processor_for_test_model(ctx: InputContext, llm_inputs: LLMInputs) -> LLMInputs:
+def input_processor_for_test_model(
+    ctx: InputContext, llm_inputs: LLMInputs
+) -> LLMInputs:
     """Validate XTTS inputs and tokenize text.
 
     Must be done here because this step of the
@@ -49,17 +59,17 @@ def input_processor_for_test_model(ctx: InputContext, llm_inputs: LLMInputs) -> 
             " Provide a list of token ids as `text_conditioning`"
             " in the `multi_modal_data` dictionary."
         )
-    conf = ctx.get_hf_config()
 
     cond_text_tokens = list(range(10))
     assert isinstance(multi_modal_data, dict)
     multi_modal_data["text_conditioning"] = [cond_text_tokens]
 
     return LLMInputs(
-        prompt_token_ids=[-1] * len(cond_text_tokens) + [999],
+        prompt_token_ids=[-1] * len(cond_text_tokens),
         prompt=None,
         multi_modal_data=multi_modal_data,
     )
+
 
 class TextConditioningPlugin(MultiModalPlugin):
     """Plugin for text prompt input data.
@@ -95,6 +105,7 @@ class TextConditioningPlugin(MultiModalPlugin):
 
 MULTIMODAL_REGISTRY.register_plugin(TextConditioningPlugin())
 
+
 @MULTIMODAL_REGISTRY.register_input_mapper("text_conditioning")
 @MULTIMODAL_REGISTRY.register_max_multimodal_tokens("text_conditioning")
 @INPUT_REGISTRY.register_dummy_data(dummy_data_for_test_model)
@@ -104,7 +115,7 @@ class TestModel(nn.Module):
         super().__init__()
         self.config = config
         self.cache_config = cache_config
-        self.a = nn.Parameter(torch.tensor([1.0]))
+        self.emb = nn.Embedding(config.vocab_size, config.hidden_size)
         self.sampler = Sampler()
 
     def forward(
@@ -113,26 +124,23 @@ class TestModel(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
-        seq_multimodal_tokens: List[int],
+        seq_multimodal_tokens: torch.Tensor,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         text_input_ids: Optional[torch.Tensor] = None,
         speaker_conditioning_embedding: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        return torch.full(
-            (input_ids.shape[0], self.config.hidden_size), 
-            seq_multimodal_tokens[0],
-            device=input_ids.device,
-        ) 
+        input_ids = input_ids.view(seq_multimodal_tokens.shape[0], -1)
+        input_ids = input_ids + seq_multimodal_tokens.unsqueeze(1)
+        input_ids = input_ids.flatten()
+        out = self.emb(input_ids)
+        return out
 
     def compute_logits(
         self,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[torch.Tensor]:
-        out = torch.randn(
-            (sampling_metadata.selected_token_indices.shape[0], 50256), 
-            device=hidden_states.device)
-        out[:, hidden_states[0][0].item()] = torch.ones(out[:, hidden_states[0][0].item()].shape, device=hidden_states.device) * 100
+        out = hidden_states[sampling_metadata.selected_token_indices, :]
         return out
 
     def sample(
@@ -155,5 +163,15 @@ class TestModel(nn.Module):
         )
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
-        pass
+        params_dict = dict(self.named_parameters(remove_duplicate=False))
+        for name, loaded_weight in weights:
 
+            if is_pp_missing_parameter(name, self):
+                continue
+            try:
+                param = params_dict[name]
+            except KeyError:
+                raise KeyError(f"{name} not in {params_dict.keys()}.")
+
+            weight_loader = getattr(param, "weight_loader", default_weight_loader)
+            weight_loader(param, loaded_weight)
