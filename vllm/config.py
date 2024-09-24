@@ -232,7 +232,10 @@ class ModelConfig:
             spec_target_max_model_len=spec_target_max_model_len)
         self.served_model_name = get_served_model_name(model,
                                                        served_model_name)
-        placeholder_token_id = getattr(self.hf_config, "image_token_index", -1)
+        placeholder_token_id = (
+                getattr(self.hf_config, "image_token_index", 0) 
+                or getattr(self.hf_config, "audio_token_index", 0) 
+                or getattr(self.hf_config, "placeholder_token_index", 0))
         self.multimodal_config = self._init_multimodal_config(
             limit_mm_per_prompt, inject_mm_metadata, placeholder_token_id)
         if not self.skip_tokenizer_init:

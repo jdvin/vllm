@@ -1536,7 +1536,6 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             if self.has_multimodal_metadata
             else None
         )
-        print("seq multi tokens:", seq_multimodal_tokens)
         return dataclasses.replace(
             model_input,
             seq_multimodal_tokens=seq_multimodal_tokens,
